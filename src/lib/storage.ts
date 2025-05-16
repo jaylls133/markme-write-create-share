@@ -6,6 +6,7 @@ export interface Document {
   createdAt: string;
   updatedAt: string;
   tags: string[];
+  expiresAt?: string; // New field for expiration
 }
 
 // Local storage keys
@@ -13,22 +14,45 @@ const DOCS_KEY = 'markme-documents';
 const PROFILE_KEY = 'markme-profile';
 const SETTINGS_KEY = 'markme-settings';
 
-// Get all documents
+// Get all documents (filtering expired ones)
 export function getDocuments(): Document[] {
   const docs = localStorage.getItem(DOCS_KEY);
-  return docs ? JSON.parse(docs) : [];
+  const allDocs = docs ? JSON.parse(docs) : [];
+  
+  // Filter out expired documents and clean them up
+  const currentDate = new Date();
+  const validDocs = allDocs.filter((doc: Document) => {
+    if (doc.expiresAt) {
+      const expiryDate = new Date(doc.expiresAt);
+      return expiryDate > currentDate;
+    }
+    return true; // Keep docs without expiration
+  });
+  
+  // If we filtered out some docs, update storage
+  if (validDocs.length < allDocs.length) {
+    localStorage.setItem(DOCS_KEY, JSON.stringify(validDocs));
+  }
+  
+  return validDocs;
 }
 
 // Get a single document
 export function getDocument(id: string): Document | null {
-  const docs = getDocuments();
+  const docs = getDocuments(); // This will filter expired docs
   return docs.find(doc => doc.id === id) || null;
 }
 
 // Save a document (create or update)
 export function saveDocument(doc: Partial<Document> & { title: string; content: string }): Document {
   const docs = getDocuments();
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowISO = now.toISOString();
+  
+  // Set expiration date - 30 days from now
+  const thirtyDaysLater = new Date();
+  thirtyDaysLater.setDate(now.getDate() + 30);
+  const expiresAtISO = thirtyDaysLater.toISOString();
   
   // Check if document exists
   const existingIndex = docs.findIndex(d => d.id === doc.id);
@@ -38,7 +62,8 @@ export function saveDocument(doc: Partial<Document> & { title: string; content: 
     const updated = {
       ...docs[existingIndex],
       ...doc,
-      updatedAt: now
+      updatedAt: nowISO,
+      expiresAt: expiresAtISO // Update expiration when document is updated
     };
     docs[existingIndex] = updated;
     localStorage.setItem(DOCS_KEY, JSON.stringify(docs));
@@ -49,8 +74,9 @@ export function saveDocument(doc: Partial<Document> & { title: string; content: 
       id: generateId(),
       title: doc.title,
       content: doc.content,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: nowISO,
+      updatedAt: nowISO,
+      expiresAt: expiresAtISO, // Set expiration for new document
       tags: doc.tags || [],
       ...doc
     };
@@ -70,6 +96,23 @@ export function deleteDocument(id: string): boolean {
     localStorage.setItem(DOCS_KEY, JSON.stringify(docs));
     return true;
   }
+  return false;
+}
+
+// Extend document expiration by 30 more days
+export function extendDocumentExpiration(id: string): boolean {
+  const docs = getDocuments();
+  const docIndex = docs.findIndex(doc => doc.id === id);
+  
+  if (docIndex >= 0) {
+    const thirtyDaysLater = new Date();
+    thirtyDaysLater.setDate(new Date().getDate() + 30);
+    
+    docs[docIndex].expiresAt = thirtyDaysLater.toISOString();
+    localStorage.setItem(DOCS_KEY, JSON.stringify(docs));
+    return true;
+  }
+  
   return false;
 }
 
@@ -167,14 +210,23 @@ I'm currently exploring **backend development** with Node.js and looking forward
 `
 };
 
-// Initialize default document if no documents exist
+// Initialize default content if no documents exist
 export function initializeDefaultContent(): void {
   const docs = getDocuments();
   if (docs.length === 0) {
+    const thirtyDaysLater = new Date();
+    thirtyDaysLater.setDate(new Date().getDate() + 30);
+    
     saveDocument({
       ...exampleDocument,
       id: 'example',
-      tags: ['sample', 'personal']
+      tags: ['sample', 'personal'],
+      expiresAt: thirtyDaysLater.toISOString()
     });
   }
+}
+
+// Function to check and clean up expired documents
+export function cleanupExpiredDocuments(): void {
+  getDocuments(); // This will trigger the filtering logic
 }
